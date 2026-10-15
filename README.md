@@ -41,7 +41,7 @@ Sources are unchanged apart from small fixes needed to run both in one process:
 ## Credits and license
 
 - **LEGO Dimensions emulator**: Developed by [SegerEnd](https://github.com/SegerEnd/Flipper-Zero-LD-Toypad-Emulator).
-- **Disney Infinity (FlipBase)**: Derived from RPCS3's Infinity emulation. For more information, visit: [Disney Infinity Site](https://elaborate-malabi-8ba2c8.netlify.app).
-- **Skylanders (SkyBase)**: Based on RPCS3's portal behavior. For more information, visit: [Skylanders Site](https://taupe-biscotti-ae60a4.netlify.app).
+- **Disney Infinity (FlipBase)**: Derived from RPCS3's Infinity emulation. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Disney Infinity BLE Site](https://elaborate-malabi-8ba2c8.netlify.app).
+- **Skylanders (SkyBase)**: Based on RPCS3's portal behavior. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Skylanders BLE Site](https://taupe-biscotti-ae60a4.netlify.app).
 
 The bundled work is distributed under GPL-2.0-only because of FlipBase. The LEGO emulator source and the Skylanders source had no license file in the archives provided; check their upstream licenses before redistributing. Not affiliated with LEGO, Disney or Activision.
