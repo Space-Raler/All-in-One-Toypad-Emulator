@@ -1,0 +1,52 @@
+App(
+    appid="toybox",
+    name="Toy Pad Emulator",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="toybox_app",
+    # FlipBase needed 6 KB before the Bluetooth link; the BLE call chain (frame handler ->
+    # figure decode -> radio send) sits on top of that, so give it headroom. LEGO and
+    # Skylanders need 4 KB. They run one at a time on this stack.
+    stack_size=8 * 1024,
+    fap_category="USB",
+    requires=["gui", "storage", "dialogs", "notification", "bt"],
+    # Launcher + the three bundled emulators.
+    sources=[
+        "inf/ble_link.c",
+        "inf/ble_proto.c",
+        "inf/flipbase_app.c",
+        "inf/inf_crypto.c",
+        "inf/infinity_core.c",
+        "inf/infinity_figures.c",
+        "inf/usb_infinity.c",
+        "ld/ToyPadEmu.c",
+        "ld/burtle.c",
+        "ld/bytes.c",
+        "ld/debug.c",
+        "ld/ldtoypad.c",
+        "ld/minifigures.c",
+        "ld/tea.c",
+        "ld/usb/descriptors.c",
+        "ld/usb/frame.c",
+        "ld/usb/save_toypad.c",
+        "ld/usb/usb_toypad.c",
+        "ld/views/EmulateToyPad_scene.c",
+        "ld/views/sub_screens.c",
+        "sky/core/sky_audio.c",
+        "sky/core/sky_core.c",
+        "sky/sky_audio_hw.c",
+        "sky/skybase.c",
+        "sky/sky_ble.c",
+        "sky/sky_ble_bridge.c",
+        "sky/sky_ble_link.c",
+        "sky/usb_skylander.c",
+        "toybox_app.c",
+    ],
+    order=60,
+    fap_version="1.1",
+    fap_icon="toybox.png",  # 10x10 1-bit PNG
+    # LEGO Dimensions icons. Keep the original symbol so <ldtoypad_icons.h> and I_* names still resolve.
+    fap_icon_assets="ld/images",
+    fap_icon_assets_symbol="ldtoypad",
+    fap_description="USB toy pad emulator: LEGO Dimensions, Disney Infinity and Skylanders in one app",
+    fap_author="SegerEnd (LEGO Dimensions), FlipBase authors (Disney Infinity), SkyBase (Skylanders)",
+)
