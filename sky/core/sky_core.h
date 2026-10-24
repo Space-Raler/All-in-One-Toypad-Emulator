@@ -72,6 +72,10 @@ int sky_base_load_figure_at(SkyBase* b, uint8_t slot, const uint8_t data[SKY_FIG
 /* Remove a figure. Returns false if the slot was empty. */
 bool sky_base_remove_figure(SkyBase* b, uint8_t slot);
 bool sky_base_slot_present(const SkyBase* b, uint8_t slot);
+/* Presence once every pending transition has been delivered to the game. While the game is still
+ * reading the status queue, sky_base_slot_present() can show a figure as gone or back mid-swap;
+ * this is what the PC page should be told. */
+bool sky_base_slot_present_settled(const SkyBase* b, uint8_t slot);
 
 /* If the slot has unsaved changes, copy its data to out, clear the flag, return true. */
 bool sky_base_take_dirty(SkyBase* b, uint8_t slot, uint8_t out[SKY_FIGURE_SIZE]);

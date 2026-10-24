@@ -228,7 +228,8 @@ const LOCAL = "local", SENDING = "sending", CONFIRMED = "confirmed", ERROR = "er
 class Session {
   constructor(transport, onLog = () => {}, onSave = () => {}) {
     this.transport = transport; this.onLog = onLog; this.onSave = onSave;
-    this.placed = new Map(); this.state = new Map();
+    this.placed = new Map(); this.state = new Map(); this.flipperSlots = new Set(); this.holding = new Set();
+    this.sentAt = new Map(); this.tries = new Map(); this.absent = new Map(); this.confirmedAt = new Map();
     this.link = "disconnected"; this.linkDetail = ""; this.usb = null; this.game = null; this.problem = null;
     this.saves = 0; this.frames = 0; this.writeBack = true; this.synced = false; this.rejected = false; this.parser = new Parser();
     this.bind(transport);
@@ -268,12 +269,35 @@ class Session {
     this.placed.set(slot, fig);
     if (this.connected) {
       this.state.set(slot, SENDING);
-      if (this.synced) this.send(P.load(slot, fig.data));
+      this.tries.set(slot, 0); this.absent.delete(slot); this.confirmedAt.delete(slot);
+      if (this.synced) this.sendLoad(slot, fig, replaced || this.flipperSlots.has(slot));
     } else this.state.set(slot, LOCAL);
     const where = this.slotName(slot);
     this.onLog(`${figLabel(fig)} -> ${where}` + (replaced ? ` (replacing ${figLabel(replaced)})` : ""));
     this.changed();
     return [true, replaced ? `${figLabel(fig)} placed on ${where}, replacing ${figLabel(replaced)}` : `${figLabel(fig)} placed on ${where}`];
+  }
+  /* Put `fig` on the Flipper's slot. When something may still be there, lift it off first and give the
+   * game a moment to see the empty slot (it only notices a new figure that way). */
+  sendLoad(slot, fig, liftFirst) {
+    this.sentAt.set(slot, Date.now());
+    if (liftFirst) {
+      this.send(P.remove(slot)); this.holding.add(slot);
+      setTimeout(() => { this.holding.delete(slot); if (this.placed.get(slot) === fig && this.connected && this.synced) { this.sentAt.set(slot, Date.now()); this.send(P.load(slot, fig.data)); } }, 700);
+    } else this.send(P.load(slot, fig.data));
+  }
+  /* A figure the Flipper never confirmed (a frame lost on the radio) used to stay yellow forever: send it again. */
+  retryUnconfirmed() {
+    if (!this.connected || !this.synced || this.rejected) return;
+    for (const [slot, fig] of this.placed) {
+      if (this.state.get(slot) !== SENDING || this.holding.has(slot)) continue;
+      if (Date.now() - (this.sentAt.get(slot) || 0) < 6000) continue;
+      const n = (this.tries.get(slot) || 0) + 1;
+      if (n > 3) { this.state.set(slot, ERROR); this.onLog(`${figLabel(fig)}: the Flipper did not confirm it after 3 tries. Lift it off and place it again.`); this.changed(); continue; }
+      this.tries.set(slot, n);
+      this.onLog(`${figLabel(fig)}: no confirmation from the Flipper for ${this.slotName(slot)}, sending again (try ${n} of 3)`);
+      this.sendLoad(slot, fig, true);
+    }
   }
   placeMany(figs, first = null) {
     let placed = 0; const notes = [];
@@ -304,7 +328,7 @@ class Session {
     if (this.connected && this.synced) this.send(P.clear());
     this.onLog("Portal cleared"); this.changed();
   }
-  resetLinkState() { this.usb = null; this.game = null; this.synced = false; this.rejected = false; this.parser = new Parser(); }
+  resetLinkState() { this.flipperSlots = new Set(); this.holding = new Set(); this.sentAt = new Map(); this.tries = new Map(); this.absent = new Map(); this.confirmedAt = new Map(); this.usb = null; this.game = null; this.synced = false; this.rejected = false; this.parser = new Parser(); }
   setTransport(t) {
     try { this.transport.disconnect(); } catch (e) {}
     this.transport = t; this.bind(t);
@@ -314,7 +338,7 @@ class Session {
   }
   connect() { return this.transport.connect(); }
   disconnect() { return this.transport.disconnect(); }
-  pollStatus() { if (this.connected && !this.rejected) this.send(this.synced ? P.statusReq() : P.hello()); }
+  pollStatus() { if (this.connected && !this.rejected) { this.retryUnconfirmed(); this.send(this.synced ? P.statusReq() : P.hello()); } }
   onLinkEvent(state, detail) {
     this.link = state; this.linkDetail = detail || "";
     if (state === "connected") {
@@ -344,19 +368,25 @@ class Session {
       if (f.type === MSG.RESULT && f.payload.length >= 3 && [MSG.DUMP_READ, MSG.DUMP_WRITE_END].includes(f.payload[0])) { if (this.onFileFrame) this.onFileFrame(f); return; }
       if (f.type === MSG.STATUS) {
         if (f.payload.length && f.payload[0] !== VERSION) return this.wrongApp(f.payload[0]);
-        const st = P.parseStatus(f.payload);
+        const st = P.parseStatus(f.payload); this.flipperSlots = new Set(st.present);
         this.usb = st.usb; this.game = st.game < GAME_NAMES.length ? st.game : null;
         if (!this.synced) { this.synced = true; this.syncAll(); return; }
         for (const slot of [...this.placed.keys()]) {
           const fig = this.placed.get(slot);
-          if (this.state.get(slot) === CONFIRMED && !st.present.has(slot)) {
-            this.onLog(`${figLabel(fig)} was removed on the Flipper`); this.placed.delete(slot); this.state.delete(slot);
-          } else if (this.state.get(slot) === SENDING && st.present.has(slot)) this.state.set(slot, CONFIRMED);
+          if (st.present.has(slot)) this.absent.delete(slot);
+          if (this.state.get(slot) === CONFIRMED && !st.present.has(slot) && !this.holding.has(slot)) {
+            /* One reply that misses the figure is not proof it was taken off (the game may be mid-swap,
+             * or the reply was queued earlier): only believe it when it repeats, a few seconds after confirming. */
+            const n = (this.absent.get(slot) || 0) + 1; this.absent.set(slot, n);
+            if (n >= 3 && Date.now() - (this.confirmedAt.get(slot) || 0) > 4000) {
+              this.onLog(`${figLabel(fig)} was removed on the Flipper`); this.placed.delete(slot); this.state.delete(slot); this.absent.delete(slot);
+            }
+          } else if (this.state.get(slot) === SENDING && st.present.has(slot) && !this.holding.has(slot)) { this.state.set(slot, CONFIRMED); this.confirmedAt.set(slot, Date.now()); }
         }
       } else if (f.type === MSG.RESULT) {
         const r = P.parseResult(f.payload);
         if (r.request === MSG.LOAD && this.placed.has(r.slot)) {
-          if (r.code === 0) this.state.set(r.slot, CONFIRMED);
+          if (r.code === 0) { this.state.set(r.slot, CONFIRMED); this.confirmedAt.set(r.slot, Date.now()); this.absent.delete(r.slot); }
           else { this.state.set(r.slot, ERROR); this.onLog(`Flipper refused ${this.slotName(r.slot)}: ${RESULT_TEXT[r.code] ?? r.code}`); }
         }
       } else if (f.type === MSG.SAVE) {
@@ -370,7 +400,8 @@ class Session {
     if (!fig) return this.onLog(`Game progress for empty slot ${slot + 1} ignored`);
     if (!this.writeBack) return this.onLog(`${figLabel(fig)}: game progress received (write-back is off)`);
     const u32 = (data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24)) >>> 0, id = data[0x10] | (data[0x11] << 8);
-    if (u32 !== fig.serial || id !== fig.charId) return this.onLog(`Could not save ${figLabel(fig)}: data is for a different figure; not overwriting`);
+    if (u32 !== fig.serial || id !== fig.charId) return this.onLog(`Could not save ${figLabel(fig)}: data is for ${slotLabel(this.game, slot)} but it is a different figure (serial ${u32.toString(16)}, id ${id}); not overwriting`);
+    if (this.state.get(slot) !== CONFIRMED) { this.state.set(slot, CONFIRMED); this.confirmedAt.set(slot, Date.now()); }   // the game is writing to it, so the Flipper has it
     if (data.length === fig.data.length && data.every((b, i) => b === fig.data[i])) return;   // nothing new since the last save
     if (!fig.backup) fig.backup = fig.data;   // first original kept
     fig.data = Uint8Array.from(data); this.saves++;
@@ -910,6 +941,23 @@ async function wikiSearch(base, name) {
   const ps = Object.values((j.query && j.query.pages) || {}).sort((a, b) => a.index - b.index);
   return ps.find((p) => norm(p.title) === want) || ps.find((p) => { const t = norm(p.title); return t.length > 3 && (t.includes(want) || want.includes(t)); }) || null;
 }
+const PIC_JUNK = /icon|logo|wordmark|banner|flag|element|button|badge|wiki\.|sprite|placeholder|commons|edit|arrow|star|coin|stat|ability|upgrade|path|gear|card|noimage|no[ _-]?image|image[ _-]?needed|site-?(logo|wordmark)/i;
+async function wikiPicUrls(base, p, name) {   // like the editor: skip icons/placeholders, prefer files named after the character, try several
+  const want = norm(name), fileOf = (u) => { try { const m = decodeURIComponent(u || "").match(/\/images\/(?:thumb\/)?[0-9a-f]\/[0-9a-f]{2}\/([^\/?]+)/i); return m ? m[1] : ""; } catch (e) { return ""; } };
+  const junk = (fn) => PIC_JUNK.test(fn) && !norm(fn).includes(want);
+  const t = p.thumbnail && p.thumbnail.source, tf = fileOf(t), out = [];
+  if (t && tf && !junk(tf) && norm(tf).includes(want)) out.push(t);   // the page picture is clearly this character's own
+  try {
+    const j = await wikiQuery(base, { prop: "images", titles: p.title, imlimit: 50, redirects: 1 }), pg = Object.values((j.query && j.query.pages) || {})[0];
+    const files = ((pg && pg.images) || []).map((x) => x.title.replace(/^[^:]+:/, "")).filter((f) => IMAGE_RE.test(f) && !junk(f)).sort((a, b) => norm(b).includes(want) - norm(a).includes(want));
+    for (const f of files.slice(0, 3)) {
+      const ij = await wikiQuery(base, { prop: "imageinfo", titles: "File:" + f, iiprop: "url", iiurlwidth: 300 });
+      for (const q of Object.values((ij.query && ij.query.pages) || {})) for (const ii of q.imageinfo || []) for (const u of [ii.thumburl, ii.url]) if (u && !out.includes(u)) out.push(u);
+    }
+  } catch (e) { log("wiki: image list failed for " + p.title + " (" + e.message + ")"); }
+  if (t && !out.includes(t) && !(tf && junk(tf))) out.push(t);   // last resort: the page's own picture
+  return out;
+}
 async function wikiRun(base, onlyNew, withInfo, prog, stopped, only) {
   let lastErr = "", connected = false;
   for (const cand of [...new Set([base, base + "/w", WIKI_DEFAULT])]) {   // typed address, its /w variant, then the built-in wiki
@@ -938,10 +986,14 @@ async function wikiRun(base, onlyNew, withInfo, prog, stopped, only) {
     if (!hit) { miss++; log("wiki: no page for " + cands.join(" / ")); continue; }
     const [c, p] = hit;
     if (withInfo && (meta[f.charId] || {}).src !== "manual") { const g = guess((p.categories || []).map((x) => x.title).join(" | ")); if (g.game || g.kind) meta[f.charId] = { ...g, src: "wiki" }; }
-    const src = p.thumbnail && p.thumbnail.source;
-    if (!src) { miss++; log(`wiki: page "${p.title}" has no picture`); continue; }
-    try { const r = await fetch(src); if (!r.ok) throw 0; const b = await r.blob(); if (!/^image\//.test(b.type)) throw 0; setPic(norm(c), c + (b.type.includes("png") ? ".png" : b.type.includes("webp") ? ".webp" : ".jpg"), b, true); }
-    catch (e) { wikiUrls[norm(c)] = src; lsSet("wikiUrls", wikiUrls); linked++; picsChanged(); }   // could not save a copy: keep the link
+    const urls = await wikiPicUrls(base, p, c);
+    if (!urls.length) { miss++; log(`wiki: page "${p.title}" has no usable picture`); continue; }
+    let saved = false;
+    for (const src of urls.slice(0, 5)) {
+      try { const r = await fetch(src); if (!r.ok) throw 0; const b = await r.blob(); if (!/^image\//.test(b.type)) throw 0; setPic(norm(c), c + (b.type.includes("png") ? ".png" : b.type.includes("webp") ? ".webp" : ".jpg"), b, true); log(`wiki: ${c} <- ${src.split("?")[0].split("/").slice(-4).join("/")}`); saved = true; break; }
+      catch (e) { /* try the next candidate */ }
+    }
+    if (!saved) { wikiUrls[norm(c)] = urls[0]; lsSet("wikiUrls", wikiUrls); linked++; picsChanged(); }   // could not save a copy: keep the link
     ok++; if (n % 10 === 0) render(true);
     await new Promise((r) => setTimeout(r, 100));
   }

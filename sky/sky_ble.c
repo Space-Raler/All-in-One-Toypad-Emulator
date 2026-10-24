@@ -125,7 +125,7 @@ static void send_status(SkyBle* b) {
     uint16_t mask = 0;
     lock(b);
     for(uint8_t i = 0; i < SKY_SLOT_COUNT; i++) {
-        if(sky_base_slot_present(b->base, i)) mask |= (uint16_t)(1u << i);
+        if(sky_base_slot_present_settled(b->base, i)) mask |= (uint16_t)(1u << i);
     }
     unlock(b);
     const uint8_t payload[5] = {

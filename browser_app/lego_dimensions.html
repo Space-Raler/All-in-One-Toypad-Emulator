@@ -65,6 +65,7 @@ dialog pre.info{white-space:pre-wrap;font-size:12px;color:var(--muted);margin:8p
 .box.vehicle.filled .shape{fill:#c4602a}
 .box.target .shape{stroke:#fff;stroke-width:1.4;stroke-dasharray:3 2}
 .box.busy .shape{opacity:.5}
+.box.source .shape{stroke:#3be8a0;stroke-width:1.6}
 .box text{pointer-events:none;text-anchor:middle;font-size:2.7px;fill:#fff;paint-order:stroke;stroke:#000;stroke-width:.5px}
 .box .num{fill:var(--muted);font-size:3px;stroke:none}
 .padname{fill:var(--muted);font-size:3px;text-anchor:middle;letter-spacing:.2px}
@@ -92,7 +93,7 @@ dialog pre.info{white-space:pre-wrap;font-size:12px;color:var(--muted);margin:8p
     <button id="bRemove" disabled>Take selected off</button>
     <button id="bClear" class="danger" disabled>Clear pad</button>
   </div>
-  <p class="hint" id="padHint">Tap a spot to choose where the next token goes, or just tap a character below to use the next free spot.</p>
+  <p class="hint" id="padHint">Tap an empty spot to choose where the next token goes, or just tap a character below to use the next free spot. To move a token, tap it on the pad, then tap the spot you want: it moves there, or switches places with whatever is on that spot.</p>
 </section>
 
 <section>
@@ -209,7 +210,7 @@ class LdSession {
     this.transport = transport; this.onLog = onLog; this.onChange = () => {};
     this.link = "disconnected"; this.linkDetail = ""; this.usb = null; this.version = null;
     this.boxes = Array.from({ length: BOXES }, () => ({ kind: 0, id: 0 }));
-    this.pending = new Set(); this.parser = new Parser(); this.problem = null; this.lastResult = null;
+    this.moving = false; this.pending = new Set(); this.parser = new Parser(); this.problem = null; this.lastResult = null;
     this.tokens = Array(BOXES).fill(null); this.asked = new Set(); this.onToken = () => {}; this.onSavedItem = () => {}; this.onResult = () => {};
     transport.onLink = (s, d) => this.onLinkEvent(s, d);
     transport.onData = (b) => { for (const f of this.parser.feed(b)) this.onFrame(f); this.onChange(); };
@@ -248,6 +249,40 @@ class LdSession {
     const nm = nameOf(KIND.VEHICLE, vehIdOf(data));
     this.onLog(`${nm} (saved) -> spot ${box + 1}`); this.onChange();
     return [true, `${nm} sent to spot ${box + 1} with its saved upgrades`];
+  }
+  /* Move the token on spot `src` to spot `dst`; if `dst` is taken the two switch places.
+   * The protocol has no "move", so this is remove + place, a short pause apart so the game sees each
+   * change. Vehicles are put back from their own memory so upgrades survive. */
+  move(src, dst) {
+    if (!this.connected) return [false, "Connect to the Flipper first."];
+    if (this.version !== null && this.version !== VERSION) return [false, this.problem || "Wrong Flipper mode."];
+    if (this.usb !== 1) return [false, USB_TEXT[this.usb] || "The pad is not ready yet."];
+    if (this.moving) return [false, "Still switching, one moment."];
+    if (src === dst || !this.boxes[src].kind) return [false, "Nothing to move there."];
+    const grab = (i) => {
+      const b = this.boxes[i]; if (!b.kind) return null;
+      if (b.kind !== KIND.VEHICLE) return { kind: b.kind, id: b.id };
+      const t = this.tokens[i];
+      if (!t || vehIdOf(t.data) !== b.id) { this.requestToken(i); return { wait: true }; }
+      return { kind: b.kind, id: b.id, rec: { uid: t.uid, data: t.data } };
+    };
+    const A = grab(src), B = grab(dst);
+    if ((A && A.wait) || (B && B.wait)) return [false, "Still reading a vehicle's memory from the Flipper. Try again in a moment."];
+    const put = (t, box) => (t.rec ? this.placeVehicle(t.rec, box) : this.place(t.kind, t.id, box));
+    const steps = [() => this.remove(src)];
+    if (B) steps.push(() => this.remove(dst));
+    steps.push(() => put(A, dst));
+    if (B) steps.push(() => put(B, src));
+    this.moving = true; this.pending.add(src); this.pending.add(dst);
+    const run = (n) => {
+      if (n >= steps.length || !this.connected) { this.moving = false; this.pending.delete(src); this.pending.delete(dst); this.onChange(); this.requestStatus(); return; }
+      steps[n](); setTimeout(() => run(n + 1), 300);
+    };
+    run(0);
+    const an = nameOf(A.kind, A.id).replace(/^\* /, "");
+    const bn = B ? nameOf(B.kind, B.id).replace(/^\* /, "") : "";
+    this.onLog(B ? `switch ${an} (spot ${src + 1}) <-> ${bn} (spot ${dst + 1})` : `move ${an}: spot ${src + 1} -> ${dst + 1}`);
+    return [true, B ? `Switching ${an} and ${bn}` : `Moving ${an} to spot ${dst + 1}`];
   }
   requestToken(box) { if (this.connected && !this.asked.has(box)) { this.asked.add(box); this.send(P.get(box)); } }
   saveToFlipper(box) { if (!this.connected) return false; this.send(P.saveVehicle(box)); return true; }
@@ -370,7 +405,7 @@ function drawPad() {
   add("text", { x: 79, y: 10.5, class: "padname" }, svg, "RIGHT PAD");
   SPOTS.forEach((s, i) => {
     const b = session ? session.boxes[i] : { kind: 0 };
-    const cls = ["box", b.kind ? "filled" : "", b.kind === KIND.VEHICLE ? "vehicle" : "", selected === i ? "target" : "", session && session.pending.has(i) ? "busy" : ""].join(" ");
+    const cls = ["box", b.kind ? "filled" : "", b.kind === KIND.VEHICLE ? "vehicle" : "", selected === i && !b.kind ? "target" : "", selected === i && b.kind ? "source" : "", session && session.pending.has(i) ? "busy" : ""].join(" ");
     const g = add("g", { class: cls });
     if (i === 1) add("circle", { class: "shape", cx: s.x, cy: s.y, r: 8 }, g); else add("rect", { class: "shape", x: s.x - 8, y: s.y - 6.5, width: 16, height: 13, rx: 2.5 }, g);
     add("text", { x: s.x, y: s.y - 7.6, class: "num" }, g, String(i + 1));
@@ -378,7 +413,17 @@ function drawPad() {
       const nm = nameOf(b.kind, b.id); const short = nm.length > 11 ? nm.slice(0, 10) + "…" : nm;
       add("text", { x: s.x, y: s.y + 1 }, g, short);
     }
-    g.addEventListener("click", () => { selected = selected === i ? null : i; render(); });
+    g.addEventListener("click", () => {
+      /* A token is picked up (selected) and another spot is tapped: move it there, or switch the two. */
+      if (selected !== null && selected !== i && session && session.connected && session.boxes[selected].kind) {
+        const [ok, m] = session.move(selected, i);
+        setMsg(m, !ok); if (ok) selected = null; render(); return;
+      }
+      selected = selected === i ? null : i;
+      if (selected !== null && session && session.boxes[selected].kind) setMsg(`${nameOf(session.boxes[selected].kind, session.boxes[selected].id).replace(/^\* /, "")} picked up: tap another spot to move it there (a token already there switches places).`);
+      else setMsg("");
+      render();
+    });
   });
 }
 

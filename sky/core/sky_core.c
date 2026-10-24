@@ -133,6 +133,13 @@ bool sky_base_slot_present(const SkyBase* b, uint8_t slot) {
     return slot < SKY_SLOT_COUNT && (b->slots[slot].status & 1);
 }
 
+bool sky_base_slot_present_settled(const SkyBase* b, uint8_t slot) {
+    if(slot >= SKY_SLOT_COUNT) return false;
+    const SkySlot* s = &b->slots[slot];
+    if(s->q_count == 0) return s->status & 1;
+    return s->q[(s->q_head + s->q_count - 1) % SKY_STATUS_QUEUE_DEPTH] & 1;
+}
+
 bool sky_base_take_dirty(SkyBase* b, uint8_t slot, uint8_t out[SKY_FIGURE_SIZE]) {
     if(slot >= SKY_SLOT_COUNT || !b->slots[slot].dirty) return false;
     memcpy(out, b->slots[slot].data, SKY_FIGURE_SIZE);
