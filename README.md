@@ -5,7 +5,7 @@ One app, three USB toy-to-life bases. Open **Apps → USB → Toy Pad Emulator**
 - **LEGO Dimensions**: the LEGO Dimensions Toy Pad emulator (`ld/`)
 - **Disney Infinity**: the FlipBase Infinity base emulator (`inf/`)
 - **Skylanders**: the Skylanders **Portal of Power** emulator (`sky/`, USB 1430:0150). Picking
-  it opens a second menu to choose the game; **Spyro's Adventure**, **Giants**, **Swap Force**, **Trap Team**, **SuperChargers** or **Imaginators** (all but Swap Force only change the slot labels and folder). Tested working on hardware: Spyro's Adventure, Swap Force, Trap Team, SuperChargers and Imaginators. Giants is the only one not tested yet.
+  it opens a second menu to choose the game; **Spyro's Adventure**, **Giants**, **Swap Force**, **Trap Team**, **SuperChargers** or **Imaginators** (all but Swap Force only change the slot labels and folder). Tested working on hardware: Spyro's Adventure, Giants, Swap Force, Trap Team, SuperChargers and Imaginators.
 
 Back in an emulator's main menu returns to the picker; Back in the Skylanders game menu returns
 to the main picker; Back in the main picker exits. Each emulator keeps its own controls and save
