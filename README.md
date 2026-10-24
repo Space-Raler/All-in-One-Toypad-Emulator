@@ -40,7 +40,7 @@ Sources are unchanged apart from small fixes needed to run both in one process:
 
 ## Credits and license
 
-- **LEGO Dimensions emulator**: Developed by [SegerEnd](https://github.com/SegerEnd/Flipper-Zero-LD-Toypad-Emulator).
+- **LEGO Dimensions emulator**: Developed by [SegerEnd](https://github.com/SegerEnd/Flipper-Zero-LD-Toypad-Emulator), Lego Dimensions [BLE Site](https://space-raler.github.io/legodimensionsweb/)
 - **Disney Infinity (FlipBase)**: Derived from RPCS3's Infinity emulation. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Disney Infinity BLE Site](https://infinitybase-emu.netlify.app).
 - **Skylanders (SkyBase)**: Based on RPCS3's portal behavior. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Skylanders BLE Site](https://space-raler.github.io/skylanderportalweb/)
 
