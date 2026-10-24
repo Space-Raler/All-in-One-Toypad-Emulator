@@ -1,0 +1,47 @@
+Skylanders BLE dump-import fix
+
+Changes:
+- Applies the declared inter-frame BLE transmit pause in the Skylanders transport.
+- Slows chunks slightly and adds a longer retry interval to reduce serial TX queue pressure during long dump listings.
+- Recursively lists 1024-byte dumps in both /ext/apps_data/skybase and /ext/apps_assets/skybase, including game subdirectories.
+- Reads from both roots, but writes only to /ext/apps_data/skybase to avoid modifying bundled assets.
+- Browser import accepts both roots and reports both locations when no dumps are found.
+
+Build on a computer with Momentum ufbt installed:
+  ufbt update --index-url=https://up.momentum-fw.dev/firmware/directory.json
+  ufbt
+Then copy dist/toybox.fap to SD:/apps/USB/ and replace the old Toy Pad Emulator app.
+The bundled dist/toybox.fap is intentionally not replaced because this environment cannot build/test a valid FAP.
+
+---- Find dumps: constant-retry fix (second round) ----
+Cause: the whole SD scan ran inside the BLE message handler, sent one frame per file (~90 bytes,
+plus a 100 ms gap each), opened every file just to read its size, and ignored send failures. Once
+the radio fell behind, every remaining file burned ~3 s of chunk retries (R climbing forever) and
+the Flipper UI was frozen the whole time.
+
+Changes:
+- sky_ble.c / skybase.c: the scan is now incremental. The handler only starts it; the app loop
+  advances it (<= 1 radio frame per loop), so the UI stays alive and Back works.
+- Sizes come from the directory entry, so files are no longer opened during the scan.
+- List frames are batched and grouped by folder (">folder" line, then bare file names): about
+  4x fewer bytes and ~15x fewer frames than before.
+- The first failed send aborts the scan (terminator sent once) instead of retrying per file.
+- index.html: decodes the batched format (still accepts old one-path-per-frame), shows a live
+  "N dumps found" count, continues with the partial list if the Flipper goes quiet for 20 s, and
+  skips a file whose reply never arrives (12 s) instead of hanging.
+- New host test: sky/tests/sky_ble_list_test.c
+    gcc -std=gnu11 -Wall -Wextra -Wno-format-truncation -fsanitize=address,undefined -I. -Icore -I../inf core/sky_core.c ../inf/ble_proto.c sky_ble.c tests/sky_ble_list_test.c -o /tmp/slt && /tmp/slt
+
+Rebuild the FAP (ufbt) and replace it on the Flipper; the web page and the firmware must both be updated.
+
+---- Transport now modelled on the Flipper mobile app (RPC over BLE) ----
+- Packets are TX_CHUNK=128 bytes (was 20), so a 1 KB frame is 8 notifications, not 52.
+- After each packet the sender waits for the radio's "data sent" event (SerialServiceEventTypeDataSent)
+  instead of a fixed 35 ms sleep; on a refused packet it waits for that same event, not a blind delay.
+- Needs link MTU >= 131 (BlueZ and Android 14+ negotiate this). If frames arrive garbled, set TX_CHUNK back to 20.
+
+---- LEGO Dimensions Bluetooth ----
+- New: ld/ld_ble.c/.h (protocol), ld/ld_ble_app.c/.h (Flipper glue), ld/tests/ld_ble_test.c,
+  browser_app/lego_dimensions.html. sky_ble_link.c gained sky_ble_link_pump_ex() (Skylanders path unchanged).
+- browser_app/index.html in this zip is now the fixed Skylanders page (earlier zips still had the old one).
+- Not included: the unfinished "load SD dump into a slot from the web page" idea for Skylanders.

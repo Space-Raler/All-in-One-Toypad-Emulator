@@ -44,6 +44,10 @@ typedef struct {
     bool show_icons_index;
     bool minifig_only_mode;
 
+    // Short status message ("BLE link on", ...) shown until ble_msg_until (furi tick)
+    const char* ble_msg;
+    uint32_t ble_msg_until;
+
     bool show_mini_menu_selected;
     MiniSelectionType mini_option_selected;
 

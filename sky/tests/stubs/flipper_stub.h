@@ -50,11 +50,13 @@ typedef struct DialogsApp DialogsApp; typedef struct { const char* extension; } 
 void dialog_file_browser_set_basic_options(DialogsFileBrowserOptions*, const char*, const void*);
 bool dialog_file_browser_show(DialogsApp*, FuriString*, FuriString*, const DialogsFileBrowserOptions*);
 /* storage */
-typedef struct Storage Storage; typedef struct File File;
+typedef struct Storage Storage; typedef struct File File; typedef struct { uint8_t flags; } FileInfo;
+#define FSF_DIRECTORY 1
 typedef enum { FSAM_READ, FSAM_WRITE } FS_AccessMode; typedef enum { FSOM_OPEN_EXISTING, FSOM_OPEN_ALWAYS, FSOM_OPEN_APPEND, FSOM_CREATE_NEW, FSOM_CREATE_ALWAYS } FS_OpenMode;
 File* storage_file_alloc(Storage*); void storage_file_free(File*);
 bool storage_file_open(File*, const char*, FS_AccessMode, FS_OpenMode); bool storage_file_close(File*);
 uint64_t storage_file_size(File*); size_t storage_file_read(File*, void*, size_t); size_t storage_file_write(File*, const void*, size_t);
+bool storage_dir_open(File*, const char*); bool storage_dir_read(File*, FileInfo*, char*, uint16_t); bool storage_dir_close(File*);
 bool storage_simply_mkdir(Storage*, const char*);
 bool storage_simply_remove(Storage*, const char*);
 /* usb */

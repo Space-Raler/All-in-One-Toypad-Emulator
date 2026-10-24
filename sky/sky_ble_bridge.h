@@ -36,6 +36,14 @@ void sky_ble_bridge_configure(
     void (*lock)(void),
     void (*unlock)(void));
 void sky_ble_bridge_set_usb_state(SkyBleBridge* bridge, uint8_t usb_state);
+void sky_ble_bridge_set_file_ops(
+    SkyBleBridge* bridge, void* file_ctx, SkyBleListDumpsFn list_dumps,
+    SkyBleReadDumpFn read_dump, SkyBleWriteDumpFn write_dump);
+
+void sky_ble_bridge_set_list_ops(
+    SkyBleBridge* bridge, SkyBleListBeginFn begin, SkyBleListStepFn step, SkyBleListEndFn end);
+/* Advance an active dump listing (call every app loop). */
+void sky_ble_bridge_list_tick(SkyBleBridge* bridge);
 
 /* Feed bytes received from the PC (any split). */
 void sky_ble_bridge_pump(SkyBleBridge* bridge, const uint8_t* data, size_t size);

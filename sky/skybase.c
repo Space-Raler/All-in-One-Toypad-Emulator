@@ -19,6 +19,7 @@
 /* Each game has its own folder (dumps + session.txt):
 *   .../spyros_adventure  .../giants  .../swap_force  .../trap_team  .../superchargers  .../imaginators */
 #define SKY_ROOT_DIR EXT_PATH("apps_data/skybase")
+#define SKY_ASSETS_ROOT_DIR EXT_PATH("apps_assets/skybase")
 #define SKY_DIR_SWAP SKY_ROOT_DIR "/swap_force"
 #define SKY_DIR_GIANTS SKY_ROOT_DIR "/giants"
 #define SKY_DIR_SPYRO SKY_ROOT_DIR "/spyros_adventure"
@@ -43,6 +44,16 @@ typedef enum { SkyGameSwapForce = 0, SkyGameTrapTeam = 1, SkyGameImaginators = 2
 
 typedef enum { LoadOk, LoadDup, LoadBadFile, LoadFull, LoadLong } LoadResult;
 
+/* Non-blocking SD scan for the PC's "Find dumps": one directory entry per step. */
+#define LIST_LEVELS 6
+typedef struct {
+    File* dir[LIST_LEVELS];
+    uint16_t base_len[LIST_LEVELS]; /* length of `path` for each open directory */
+    int8_t depth; /* index of the innermost open directory, -1 = none open */
+    uint8_t root; /* next root to open: 0 = apps_data, 1 = apps_assets, 2 = done */
+    char path[PATH_LEN]; /* path of the innermost open directory */
+} BleLister;
+
 typedef struct {
     Gui* gui;
     ViewPort* view_port;
@@ -65,6 +76,7 @@ typedef struct {
     SkyBleLink* ble_link;
     bool ble_enabled;
     SkyBleBridge* ble_bridge;
+    BleLister* lister; /* allocated only while a dump listing is running */
     SkyGame game; /* label layout only (set by the game picked in ToyBox) */
     const char* dir; /* this game's dump folder */
     char session_file[PATH_LEN];
@@ -164,10 +176,21 @@ static const char* usb_text(const App* app) {
     }
 }
 
-static const char* ble_text(const App* app) {
+static const char* ble_text(const App* app, char* buf, size_t size) {
     if(!app->ble_enabled) return "BLE: Off";
     if(!app->ble_link || !sky_ble_link_connected(app->ble_link)) return "BLE: waiting for PC";
-    return "BLE: PC connected";
+    if(!app->ble_bridge) return "BLE: PC connected";
+    /* W = game writes that changed a figure, S = SAVEs sent to the PC, F = SAVE sends that failed,
+     * R = radio chunks that needed a retry (a busy radio) */
+    snprintf(
+        buf,
+        size,
+        "W%lu S%u F%u R%u",
+        (unsigned long)app->base->block_writes,
+        (unsigned)app->ble_bridge->ble.saves_sent,
+        (unsigned)app->ble_bridge->ble.saves_failed,
+        (unsigned)app->ble_link->tx_retries);
+    return buf;
 }
 
 /* ---------------- drawing ---------------- */
@@ -233,7 +256,7 @@ static void draw_cb(Canvas* canvas, void* ctx) {
         slot_label(app->game, app->cursor, t, sizeof(t));
         canvas_draw_str(canvas, 2, 10, t);
     } else {
-        canvas_draw_str(canvas, 2, 10, "Skylanders Portal");
+        canvas_draw_str(canvas, 2, 10, "Skylanders v2");
     }
     canvas_set_font(canvas, FontSecondary);
     char tag[12];
@@ -307,8 +330,13 @@ static void draw_cb(Canvas* canvas, void* ctx) {
 
     canvas_draw_line(canvas, 0, 54, 127, 54);
     /* USB and Bluetooth state share the bottom-left line, alternating every 3 s. */
+    char ble_buf[32];
     canvas_draw_str(
-        canvas, 2, 63, app->ble_enabled && (furi_get_tick() / 3000) % 2 == 0 ? ble_text(app) : usb_text(app));
+        canvas,
+        2,
+        63,
+        app->ble_enabled && (furi_get_tick() / 3000) % 2 == 0 ? ble_text(app, ble_buf, sizeof(ble_buf)) :
+                                                                  usb_text(app));
     if(app->usb.cmd_count > 0) {
         char letters[8];
         uint8_t n = 0;
@@ -575,6 +603,167 @@ static void ble_unsent_cb(void* ctx, uint8_t slot, const uint8_t data[SKY_FIGURE
     set_msg(app, ok ? "Unsent data kept" : "Unsent save failed");
 }
 
+/* Bluetooth reads may scan app_data and app_assets. Writes are intentionally limited to
+ * app_data, where user-owned dumps live; app_assets may contain bundled/read-only content. */
+static bool ble_safe_dump_read_path(const char* path) {
+    const char* data_prefix = "/ext/apps_data/skybase/";
+    const char* assets_prefix = "/ext/apps_assets/skybase/";
+    if(!path || (strncmp(path, data_prefix, strlen(data_prefix)) != 0 &&
+                 strncmp(path, assets_prefix, strlen(assets_prefix)) != 0) ||
+       strstr(path, "..") || strchr(path, '\\')) return false;
+    if(strstr(path, "session.txt") || strstr(path, "favorites.txt") || strstr(path, "debug.txt") ||
+       strstr(path, "settings.txt") || strstr(path, "unsent_slot")) return false;
+    return true;
+}
+
+static bool ble_safe_dump_write_path(const char* path) {
+    const char* prefix = "/ext/apps_data/skybase/";
+    return path && strncmp(path, prefix, strlen(prefix)) == 0 &&
+           ble_safe_dump_read_path(path);
+}
+
+static bool ble_read_dump_cb(void* ctx, const char* path, uint8_t data[SKY_FIGURE_SIZE]) {
+    App* app = ctx;
+    if(!ble_safe_dump_read_path(path)) return false;
+    File* f = storage_file_alloc(app->storage);
+    bool ok = storage_file_open(f, path, FSAM_READ, FSOM_OPEN_EXISTING) &&
+              storage_file_size(f) == SKY_FIGURE_SIZE &&
+              storage_file_read(f, data, SKY_FIGURE_SIZE) == SKY_FIGURE_SIZE;
+    storage_file_close(f); storage_file_free(f);
+    return ok;
+}
+
+static bool ble_write_dump_cb(void* ctx, const char* path, const uint8_t data[SKY_FIGURE_SIZE]) {
+    App* app = ctx;
+    if(!ble_safe_dump_write_path(path)) return false;
+    File* f = storage_file_alloc(app->storage);
+    bool ok = storage_file_open(f, path, FSAM_WRITE, FSOM_OPEN_EXISTING) &&
+              storage_file_size(f) == SKY_FIGURE_SIZE &&
+              storage_file_write(f, data, SKY_FIGURE_SIZE) == SKY_FIGURE_SIZE;
+    storage_file_close(f); storage_file_free(f);
+    return ok;
+}
+
+static void ble_list_dir(App* app, const char* dir, uint8_t depth, SkyBleEmitPathFn emit, void* emit_ctx) {
+    if(depth > 5) return;
+    File* d = storage_file_alloc(app->storage);
+    if(!storage_dir_open(d, dir)) { storage_file_free(d); return; }
+    FileInfo info; char name[PATH_LEN];
+    while(storage_dir_read(d, &info, name, sizeof(name))) {
+        if(!name[0] || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        char path[PATH_LEN];
+        const int n = snprintf(path, sizeof(path), "%s/%s", dir, name);
+        if(n <= 0 || (size_t)n >= sizeof(path)) continue;
+        if(info.flags & FSF_DIRECTORY) {
+            ble_list_dir(app, path, (uint8_t)(depth + 1), emit, emit_ctx);
+        } else {
+            File* f = storage_file_alloc(app->storage);
+            const bool is_dump = storage_file_open(f, path, FSAM_READ, FSOM_OPEN_EXISTING) &&
+                                 storage_file_size(f) == SKY_FIGURE_SIZE;
+            storage_file_close(f); storage_file_free(f);
+            if(is_dump && ble_safe_dump_read_path(path)) emit(emit_ctx, path);
+        }
+    }
+    storage_dir_close(d); storage_file_free(d);
+}
+
+static void ble_list_dumps_cb(void* ctx, SkyBleEmitPathFn emit, void* emit_ctx) {
+    App* app = ctx;
+    ble_list_dir(app, SKY_ROOT_DIR, 0, emit, emit_ctx);
+    ble_list_dir(app, SKY_ASSETS_ROOT_DIR, 0, emit, emit_ctx);
+}
+
+/* ---- incremental listing (used by the BLE "Find dumps") ---- */
+static void ble_lister_end(void* ctx) {
+    App* app = ctx;
+    BleLister* l = app->lister;
+    if(!l) return;
+    for(int i = 0; i < LIST_LEVELS; i++) {
+        if(l->dir[i]) {
+            storage_dir_close(l->dir[i]);
+            storage_file_free(l->dir[i]);
+        }
+    }
+    free(l);
+    app->lister = NULL;
+}
+
+static void ble_lister_begin(void* ctx) {
+    App* app = ctx;
+    ble_lister_end(app); /* a new request restarts the scan */
+    BleLister* l = malloc(sizeof(BleLister));
+    if(!l) return;
+    memset(l, 0, sizeof(*l));
+    l->depth = -1;
+    app->lister = l;
+}
+
+/* Does one small unit of work. Returns true while more remains. */
+static bool ble_lister_step(void* ctx, SkyBleEmitPathFn emit, void* emit_ctx) {
+    App* app = ctx;
+    BleLister* l = app->lister;
+    if(!l) return false;
+
+    if(l->depth < 0) {
+        if(l->root >= 2) return false;
+        const char* root = (l->root == 0) ? SKY_ROOT_DIR : SKY_ASSETS_ROOT_DIR;
+        l->root++;
+        File* d = storage_file_alloc(app->storage);
+        if(storage_dir_open(d, root)) {
+            snprintf(l->path, sizeof(l->path), "%s", root);
+            l->dir[0] = d;
+            l->base_len[0] = (uint16_t)strlen(l->path);
+            l->depth = 0;
+        } else {
+            storage_file_free(d); /* folder missing: skip it */
+        }
+        return true;
+    }
+
+    FileInfo info;
+    char name[PATH_LEN];
+    if(!storage_dir_read(l->dir[l->depth], &info, name, sizeof(name))) {
+        /* This folder is finished: close it and go back up. */
+        storage_dir_close(l->dir[l->depth]);
+        storage_file_free(l->dir[l->depth]);
+        l->dir[l->depth] = NULL;
+        l->depth--;
+        if(l->depth >= 0) l->path[l->base_len[l->depth]] = '\0';
+        return true;
+    }
+    if(!name[0] || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return true;
+
+    char full[PATH_LEN];
+    const int n = snprintf(full, sizeof(full), "%s/%s", l->path, name);
+    if(n <= 0 || (size_t)n >= sizeof(full)) return true;
+
+    if(info.flags & FSF_DIRECTORY) {
+        if(l->depth + 1 >= LIST_LEVELS) return true;
+        File* d = storage_file_alloc(app->storage);
+        if(storage_dir_open(d, full)) {
+            snprintf(l->path, sizeof(l->path), "%s", full);
+            l->depth++;
+            l->dir[l->depth] = d;
+            l->base_len[l->depth] = (uint16_t)strlen(l->path);
+        } else {
+            storage_file_free(d);
+        }
+        return true;
+    }
+
+    /* The directory entry already carries the size, so no file has to be opened. */
+    bool is_dump = (info.size == SKY_FIGURE_SIZE);
+    if(!is_dump && info.size == 0) { /* size not filled in by this firmware: ask the file */
+        File* f = storage_file_alloc(app->storage);
+        is_dump = storage_file_open(f, full, FSAM_READ, FSOM_OPEN_EXISTING) &&
+                  storage_file_size(f) == SKY_FIGURE_SIZE;
+        storage_file_close(f);
+        storage_file_free(f);
+    }
+    if(is_dump && ble_safe_dump_read_path(full)) emit(emit_ctx, full);
+    return true;
+}
+
 /* After the PC changed the portal: a slot it overwrote or emptied is no longer the SD file
  * we remember, so the SD file must never receive its data. */
 static void ble_sync_loaded(App* app) {
@@ -595,6 +784,7 @@ static void ble_service(App* app) {
     for(uint8_t i = 0; i < SKY_SLOT_COUNT; i++) save_slot(app, i);
     sky_ble_bridge_set_usb_state(app->ble_bridge, (uint8_t)app->usb.state);
     sky_ble_link_pump(app->ble_link, app->ble_bridge);
+    sky_ble_bridge_list_tick(app->ble_bridge); /* "Find dumps": at most one radio frame per loop */
     ble_sync_loaded(app);
     sky_ble_bridge_poll_saves(app->ble_bridge, app->io_buf, ble_unsent_cb, app);
 }
@@ -627,6 +817,8 @@ static void toggle_ble(App* app) {
         return;
     }
     sky_ble_bridge_configure(app->ble_bridge, (uint8_t)app->game, ble_lock, ble_unlock);
+    sky_ble_bridge_set_file_ops(app->ble_bridge, app, ble_list_dumps_cb, ble_read_dump_cb, ble_write_dump_cb);
+    sky_ble_bridge_set_list_ops(app->ble_bridge, ble_lister_begin, ble_lister_step, ble_lister_end);
     sky_ble_bridge_set_link(app->ble_bridge, app->ble_link);
     app->ble_enabled = true;
     set_msg(app, "BLE on");

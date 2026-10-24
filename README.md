@@ -16,6 +16,22 @@ dumps of figures you own).
 The Skylanders portal is one generic Portal of Power; the game menu only picks the game's label.
 The game list is a small table in `toybox_app.c` (`toybox_sky_labels`) if more are added later.
 
+## LEGO Dimensions from a web page (Bluetooth)
+
+Like the Skylanders portal, the LEGO Toy Pad can be controlled from a phone or computer:
+
+1. On the Flipper open **Toy Pad Emulator -> LEGO Dimensions -> Emulate** and **hold Left** to turn the
+   Bluetooth link on (hold Left again to turn it off). A message shows *BLE link on*, then
+   *Waiting for PC* / *PC connected*. There is no Config setting for it any more.
+2. Plug the Flipper into the console (Emulate stays open on the Flipper).
+3. Open `browser_app/lego_dimensions.html` in Chrome (Android / desktop) or Bluefy (iPhone), tap
+   **Connect Flipper**, and tap characters or vehicles to put them on the pad. Tap a spot first
+   to choose where a token goes. Changes made with the Flipper's own buttons show up on the page too.
+
+The page only names tokens (character / vehicle id); the Flipper builds them exactly as its own menus do,
+so nothing is written to the SD card. It needs the rebuilt `toybox.fap` (the bundled `dist/` file is old).
+The protocol is documented in `ld/ld_ble.h`; host test: `ld/tests/ld_ble_test.c`.
+
 ## Build (Momentum)
 
     ufbt update --index-url=https://up.momentum-fw.dev/firmware/directory.json
@@ -40,8 +56,13 @@ Sources are unchanged apart from small fixes needed to run both in one process:
 
 ## Credits and license
 
-- **LEGO Dimensions emulator**: Developed by [SegerEnd](https://github.com/SegerEnd/Flipper-Zero-LD-Toypad-Emulator), Lego Dimensions [BLE Site](https://space-raler.github.io/legodimensionsweb/)
-- **Disney Infinity (FlipBase)**: Derived from RPCS3's Infinity emulation. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Disney Infinity BLE Site](https://space-raler.github.io/disneyinfinityweb/).
-- **Skylanders (SkyBase)**: Based on RPCS3's portal behavior. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Skylanders BLE Site](https://space-raler.github.io/skylanderportalweb/)
+- **LEGO Dimensions emulator**: Developed by [SegerEnd](https://github.com/SegerEnd/Flipper-Zero-LD-Toypad-Emulator).
+- **Disney Infinity (FlipBase)**: Derived from RPCS3's Infinity emulation. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Disney Infinity BLE Site](https://infinitybase-emu.netlify.app).
+- **Skylanders (SkyBase)**: Based on RPCS3's portal behavior. You can use your phone or computer to connect via Bluetooth and change characters using your own dumps here: [Skylanders BLE Site](https://skylanderportal.netlify.app).
 
 The bundled work is distributed under GPL-2.0-only because of FlipBase. The LEGO emulator source and the Skylanders source had no license file in the archives provided; check their upstream licenses before redistributing. Not affiliated with LEGO, Disney or Activision.
+
+
+## Bluefy browser SD-card import/export extension
+
+This source archive adds a protocol extension for the Skylanders BLE link. The matching browser page is in `browser_app/index.html`. To use **Find dumps on Flipper** or **Save selected to Flipper**, rebuild and install the updated `toybox.fap` from source with `ufbt` (see Build above). The prebuilt file under `dist/` is the original binary and does **not** include the new file-transfer commands. The extension reads only 1024-byte files under `/ext/apps_data/skybase/` and only overwrites existing dump files in that tree.

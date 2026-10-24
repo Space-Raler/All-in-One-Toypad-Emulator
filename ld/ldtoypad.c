@@ -8,6 +8,7 @@
 #include "usb/save_toypad.h"
 
 #include "ToyPadEmu.h"
+#include "ld_ble_app.h"
 
 typedef enum {
     EmulateToyPadSubmenuIndex,
@@ -105,6 +106,78 @@ static void ldtoypad_setting_quick_switching_mode_change(VariableItem* item) {
     quick_swap = index;
 }
 
+/* Bluetooth link to the web page (browser_app/lego_dimensions.html).
+ * Hold Left on the Emulate screen to turn it on/off, like the Infinity and Skylanders emulators.
+ * The input handler only sets a request; the radio is started/stopped from the tick callback
+ * below, outside any view/model callback, because switching the Bluetooth profile blocks for a
+ * moment and doing that inside a GUI callback froze the Flipper. */
+static volatile bool ble_toggle_request = false;
+static const char* ble_last_text = NULL;
+
+void ldtoypad_request_ble_toggle(void) {
+    ble_toggle_request = true;
+}
+
+static void ldtoypad_ble_toast(LDToyPadApp* app, const char* text) {
+    with_view_model(
+        ldtoypad_scene_emulate_get_view(app->view_scene_emulate),
+        LDToyPadSceneEmulateModel * model,
+        {
+            model->ble_msg = text;
+            model->ble_msg_until = furi_get_tick() + 2000;
+        },
+        true);
+}
+
+/* Runs on the app thread every 100 ms: toggles the link on request, serves the web page and
+ * keeps the on-screen message current. */
+static void ldtoypad_tick_callback(void* context) {
+    LDToyPadApp* app = (LDToyPadApp*)context;
+
+    if(ble_toggle_request) {
+        ble_toggle_request = false;
+        if(ld_ble_app_enabled()) {
+            ld_ble_app_stop();
+            ble_last_text = NULL;
+            ldtoypad_ble_toast(app, "BLE link off");
+        } else if(ld_ble_app_start()) {
+            ble_last_text = ld_ble_app_status_text();
+            ldtoypad_ble_toast(app, "BLE link on");
+        } else {
+            ldtoypad_ble_toast(app, "BLE start failed");
+        }
+    }
+
+    if(ld_ble_app_enabled()) {
+        if(ld_ble_app_tick()) {
+            with_view_model(
+                ldtoypad_scene_emulate_get_view(app->view_scene_emulate),
+                LDToyPadSceneEmulateModel * model,
+                { UNUSED(model); },
+                true); /* the web page changed the pad: redraw */
+        }
+        if(ld_ble_app_take_saved_changed()) fill_saved_submenu(app);
+        const char* text = ld_ble_app_status_text();
+        if(text != ble_last_text) { /* "Waiting for PC" <-> "PC connected" */
+            ble_last_text = text;
+            ldtoypad_ble_toast(app, text);
+        }
+    }
+
+    /* Keep redrawing while the message is up, and once more when it expires. */
+    bool redraw = false;
+    with_view_model(
+        ldtoypad_scene_emulate_get_view(app->view_scene_emulate),
+        LDToyPadSceneEmulateModel * model,
+        {
+            if(model->ble_msg) {
+                redraw = true;
+                if((int32_t)(furi_get_tick() - model->ble_msg_until) >= 0) model->ble_msg = NULL;
+            }
+        },
+        redraw);
+}
+
 static uint32_t minifigures_submenu_previous_callback(void* context) {
     UNUSED(context);
     return ViewEmulate;
@@ -121,6 +194,7 @@ static void ldtoypad_setup_dispatcher(LDToyPadApp* app, Gui* gui) {
     view_dispatcher = app->view_dispatcher;
     view_dispatcher_attach_to_gui(app->view_dispatcher, gui, ViewDispatcherTypeFullscreen);
     view_dispatcher_set_event_callback_context(app->view_dispatcher, app);
+    view_dispatcher_set_tick_event_callback(app->view_dispatcher, ldtoypad_tick_callback, 100);
 }
 
 static void ldtoypad_setup_main_menu(LDToyPadApp* app) {
@@ -200,6 +274,8 @@ static void ldtoypad_setup_emulation_view(LDToyPadApp* app) {
     model->show_debug_text_index = false;
     model->show_icons_index = false;
     model->minifig_only_mode = false;
+    model->ble_msg = NULL;
+    model->ble_msg_until = 0;
 
     view_dispatcher_add_view(
         app->view_dispatcher,
@@ -390,10 +466,15 @@ static void ldtoypad_app_free(LDToyPadApp* app) {
 int32_t ldtoypad_app(void* _p) {
     UNUSED(_p);
     quick_swap = false; /* the Config screen always starts at "No" */
+    ble_toggle_request = false;
+    ble_last_text = NULL;
     LDToyPadApp* app = ldtoypad_app_alloc();
 
     view_dispatcher_run(app->view_dispatcher);
 
+    ld_ble_app_stop(); /* gives Bluetooth back before the USB mode is restored */
+    ble_last_text = NULL;
+    ble_toggle_request = false;
     ldtoypad_app_free(app);
 
     return 0;

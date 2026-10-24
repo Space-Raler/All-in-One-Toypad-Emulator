@@ -247,6 +247,7 @@ void sky_base_handle_command(SkyBase* b, const uint8_t* buf, size_t len) {
             if(memcmp(dst, buf + 3, SKY_BLOCK_SIZE) != 0) {
                 memcpy(dst, buf + 3, SKY_BLOCK_SIZE);
                 s->dirty = true;
+                b->block_writes++;
             }
         } else {
             r[1] = n;

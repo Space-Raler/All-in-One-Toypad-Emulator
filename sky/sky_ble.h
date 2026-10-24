@@ -20,9 +20,23 @@
 extern "C" {
 #endif
 
+/* Bytes of list lines per DUMP_LIST_ITEM frame, and listing work done per poll. */
+#define SKY_BLE_LIST_BATCH 400
+#define SKY_BLE_LIST_STEPS 32
+
 typedef bool (*SkyBleSendFn)(void* ctx, uint8_t type, const uint8_t* payload, uint16_t len);
 /* Persist data that could not be sent to the PC (the app writes unsent_slotN.bin). */
 typedef void (*SkyBleSaveFn)(void* ctx, uint8_t slot, const uint8_t data[SKY_FIGURE_SIZE]);
+typedef void (*SkyBleEmitPathFn)(void* emit_ctx, const char* path);
+typedef void (*SkyBleListDumpsFn)(void* file_ctx, SkyBleEmitPathFn emit, void* emit_ctx);
+/* Incremental dump listing (preferred): begin, then step until it returns false, then end.
+ * Each step does a small amount of work and may call emit() for found dumps. This keeps the
+ * app loop responsive and lets the link abort the listing the moment a send fails. */
+typedef void (*SkyBleListBeginFn)(void* file_ctx);
+typedef bool (*SkyBleListStepFn)(void* file_ctx, SkyBleEmitPathFn emit, void* emit_ctx);
+typedef void (*SkyBleListEndFn)(void* file_ctx);
+typedef bool (*SkyBleReadDumpFn)(void* file_ctx, const char* path, uint8_t data[SKY_FIGURE_SIZE]);
+typedef bool (*SkyBleWriteDumpFn)(void* file_ctx, const char* path, const uint8_t data[SKY_FIGURE_SIZE]);
 
 typedef struct {
     SkyBase* base;
@@ -33,9 +47,47 @@ typedef struct {
     uint8_t game; /* SkyGame value reported in STATUS */
     uint8_t usb_state; /* UsbSkyState value reported in STATUS */
     bool remote[SKY_SLOT_COUNT]; /* figure in this slot came from the PC */
+    uint8_t fails[SKY_SLOT_COUNT]; /* consecutive failed SAVE sends per slot */
+    uint16_t saves_sent; /* diagnostics, shown on the Flipper screen */
+    uint16_t saves_failed;
+    /* Optional SD-card file operations, configured by skybase.c. */
+    void* file_ctx;
+    SkyBleListDumpsFn list_dumps;
+    SkyBleReadDumpFn read_dump;
+    SkyBleWriteDumpFn write_dump;
+    /* Incremental listing state. Items are batched: one frame carries several '\n'-separated
+     * lines, each either ">dir" (sets the current directory) or a bare file name inside it. */
+    SkyBleListBeginFn list_begin;
+    SkyBleListStepFn list_step;
+    SkyBleListEndFn list_end;
+    bool list_active;
+    bool list_failed;
+    uint16_t list_frames; /* item frames sent in this listing */
+    uint16_t list_found;  /* dumps found in this listing */
+    uint16_t list_len;
+    uint16_t list_dir_len;
+    uint8_t list_buf[SKY_BLE_LIST_BATCH];
+    char list_dir[256];
+    char write_path[256];
+    uint8_t write_data[SKY_FIGURE_SIZE];
+    uint16_t write_offset;
+    bool write_active;
 } SkyBle;
 
+/* A failed SAVE is retried this many times before the data is parked as unsent_slotN.bin. */
+#define SKY_BLE_SAVE_RETRIES 4
+
 void sky_ble_init(SkyBle* b, SkyBase* base, SkyBleSendFn send, void* send_ctx);
+void sky_ble_set_file_ops(
+    SkyBle* b, void* file_ctx, SkyBleListDumpsFn list_dumps,
+    SkyBleReadDumpFn read_dump, SkyBleWriteDumpFn write_dump);
+
+void sky_ble_set_list_ops(
+    SkyBle* b, SkyBleListBeginFn begin, SkyBleListStepFn step, SkyBleListEndFn end);
+/* Call from the app loop: advances an active dump listing by one radio frame at most. */
+void sky_ble_list_tick(SkyBle* b);
+/* Stop a running listing and release its resources (BLE going away). */
+void sky_ble_list_cancel(SkyBle* b);
 
 /* Matches BleProtoHandler; ctx is the SkyBle*. */
 void sky_ble_on_message(void* ctx, uint8_t type, const uint8_t* payload, uint16_t len);

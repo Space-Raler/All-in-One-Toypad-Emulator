@@ -208,7 +208,12 @@ bool ldtoypad_scene_emulate_input_callback(InputEvent* event, void* context) {
                 // make user loop through boxes with InputKeyLeft, InputKeyRight, InputKeyUp, InputKeyDown
                 switch(event->key) {
                 case InputKeyLeft:
-                    if(event->type == InputTypePress) {
+                    if(event->type == InputTypeLong) {
+                        /* Hold Left: Bluetooth link on/off. The press already moved the
+                         * selection one box left, so put it back. */
+                        selectedBox = (selectedBox + 1) % NUM_BOXES;
+                        ldtoypad_request_ble_toggle(); /* done later on the app's tick */
+                    } else if(event->type == InputTypePress) {
                         model->left_pressed = true;
                         if(selectedBox == 0) {
                             selectedBox = NUM_BOXES;
@@ -463,6 +468,10 @@ static void ldtoypad_scene_emulate_draw_render_callback(Canvas* canvas, void* co
         }
 
         canvas_set_font(canvas, FontPrimary);
+    }
+
+    if(model->ble_msg) {
+        elements_multiline_text_framed(canvas, 24, 28, model->ble_msg);
     }
 
     if(!model->connected && model->ok_pressed) {

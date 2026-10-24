@@ -17,6 +17,7 @@ This project emulates the behavior of the original USB ToyPad, allowing you to i
 - Plug-and-play when connected to the game via USB to your console.
 - ⭐ Favorites, you can favourite a character for quick placement in the favorites submenu
 - 💾 Saving, you can save a upgraded vehicle and place it via "saved vehicles"
+- 🌐 With the Bluetooth web page (browser_app/lego_dimensions.html) vehicle upgrades are kept and restored automatically
 
 ## Screenshots
 

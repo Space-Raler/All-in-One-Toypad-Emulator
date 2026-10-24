@@ -26,6 +26,10 @@ extern FuriHalUsbInterface usb_hid_ldtoypad;
 usbd_device* get_usb_device();
 
 uint8_t get_connected_status();
+
+/* Bit n is set when the game wrote to the token with index n (set from the USB interrupt, cleared
+ * by the Bluetooth link). Lets the web page keep vehicle upgrades. Use the atomic builtins. */
+extern volatile uint8_t ld_token_dirty_mask;
 void set_connected_status(enum ConnectedStatus status);
 
 #ifdef __cplusplus

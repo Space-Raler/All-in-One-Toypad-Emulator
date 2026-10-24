@@ -161,9 +161,17 @@ static void test_poll_saves_unsent_when_send_fails(void) {
     sky_base_mark_dirty(&base, 6);
     send_ok = false;
     uint8_t scratch[SKY_FIGURE_SIZE];
-    sky_ble_poll_saves(&ble, scratch, fake_unsent, NULL);
-    assert(unsent_calls == 1 && unsent_slot == 6);
+    for(int k = 0; k < SKY_BLE_SAVE_RETRIES - 1; k++) { /* retried first, nothing parked yet */
+        sky_ble_poll_saves(&ble, scratch, fake_unsent, NULL);
+        assert(unsent_calls == 0 && base.slots[6].dirty);
+    }
+    sky_ble_poll_saves(&ble, scratch, fake_unsent, NULL); /* last try fails: parked */
+    assert(unsent_calls == 1 && unsent_slot == 6 && ble.saves_failed == SKY_BLE_SAVE_RETRIES);
     assert(memcmp(unsent_data, fig_b + 1, SKY_FIGURE_SIZE) == 0);
+    send_ok = true; /* a later success after one failure goes through and resets the counter */
+    sky_base_mark_dirty(&base, 6);
+    sky_ble_poll_saves(&ble, scratch, fake_unsent, NULL);
+    assert(ble.saves_sent == 1 && ble.fails[6] == 0);
 }
 
 static void test_flush_unsent_writes_dirty_and_clears_remote(void) {

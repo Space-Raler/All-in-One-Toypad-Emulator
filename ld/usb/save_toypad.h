@@ -33,6 +33,10 @@ bool save_token(Token* token);
 void fill_saved_submenu(LDToyPadApp* app);
 Token* load_saved_token(char* filepath);
 
+/* For the Bluetooth link: saved vehicle files by plain name ("Batmobile-04aabbccdd.toy"). */
+void ld_saved_vehicle_list(void (*emit)(void* ctx, const char* name), void* ctx, int max);
+bool ld_saved_vehicle_read(const char* name, uint8_t uid[7], uint8_t data[180]);
+
 bool save_toypad(Token tokens[MAX_TOKENS], BoxInfo boxes[NUM_BOXES], char* filename);
 bool load_saved_toypad(Token* tokens[MAX_TOKENS], BoxInfo boxes[NUM_BOXES], char* filename);
 

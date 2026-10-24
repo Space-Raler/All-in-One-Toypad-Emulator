@@ -33,6 +33,7 @@ extern "C" {
 
 #define BLE_PROTO_VERSION 1 /* Infinity (FlipBase): 320-byte figures */
 #define BLE_PROTO_VERSION_SKY 2 /* Skylanders: 1024-byte figures, STATUS carries the game */
+#define BLE_PROTO_VERSION_LD 3 /* LEGO Dimensions: tokens are named by id, STATUS lists the 7 boxes */
 #define BLE_PROTO_SOF     0xA5
 #define BLE_PROTO_FIGURE  320
 #define BLE_PROTO_SKY_FIGURE 1024
@@ -48,7 +49,29 @@ enum {
     BleMsgStatus = 0x81,
     BleMsgResult = 0x82,
     BleMsgSave = 0x83,
+    /* SkyBase SD-card dump file transfer (protocol v2 extension). */
+    BleMsgDumpList = 0x06,
+    BleMsgDumpRead = 0x07,
+    BleMsgDumpWriteBegin = 0x08,
+    BleMsgDumpWriteChunk = 0x09,
+    BleMsgDumpWriteEnd = 0x0A,
+    BleMsgLdPlace = 0x0C, /* LEGO Dimensions: [box][kind][id lo][id hi]([up0 4][up1 4]) */
+    /* LEGO Dimensions vehicle memory (upgrades live in the token data the game writes). */
+    BleMsgLdPlaceVehicle = 0x0D, /* [box][uid 7][token 180] place a vehicle exactly as saved */
+    BleMsgLdGet = 0x0E,          /* [box] -> LD_TOKEN */
+    BleMsgLdSavedList = 0x0F,    /* list vehicles saved on the Flipper -> LD_SAVED_ITEM ... empty */
+    BleMsgLdSavedRead = 0x10,    /* [file name] -> LD_TOKEN with box 0xFF */
+    BleMsgLdSaveVehicle = 0x11,  /* [box] save that vehicle to the Flipper's own saved vehicles */
+    BleMsgDumpListItem = 0x84,
+    BleMsgDumpData = 0x85,
+    BleMsgLdToken = 0x86,        /* [box][uid 7][token 180]: the game changed it, or LD_GET/SAVED_READ */
+    BleMsgLdSavedItem = 0x87,    /* [file name]; an empty frame ends the list */
 };
+
+#define BLE_LD_UID_SIZE 7
+#define BLE_LD_TOKEN_SIZE 180
+#define BLE_LD_TOKEN_FRAME (1 + BLE_LD_UID_SIZE + BLE_LD_TOKEN_SIZE)
+#define BLE_LD_BOX_FILE 0xFF /* LD_TOKEN box value for "read from a saved file" */
 
 /* RESULT codes. */
 enum {
@@ -57,6 +80,7 @@ enum {
     BleResultBadLength = 2,
     BleResultNotPresent = 3,
     BleResultUnknown = 4,
+    BleResultNotReady = 5, /* LEGO: the toy pad is not connected to a console yet */
 };
 
 typedef void (*BleProtoHandler)(void* ctx, uint8_t type, const uint8_t* payload, uint16_t len);

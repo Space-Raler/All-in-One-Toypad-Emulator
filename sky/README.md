@@ -56,3 +56,8 @@ The game's light commands are shown on the Flipper: the ring colour (`C`, and `L
     gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Icore core/sky_core.c tests/speaker_flag_test.c -o /tmp/mt && /tmp/mt
     gcc -std=c11 -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -Icore core/sky_core.c tests/lights_test.c -o /tmp/lt && /tmp/lt
     for f in usb_skylander.c skybase.c sky_audio_hw.c; do gcc -std=gnu11 -fsyntax-only -Itests/stubs -I. $f; done   # run from toybox/sky   # stub-header syntax check only
+
+
+## Browser SD-card dump transfer (protocol v2 extension)
+
+The Bluefy browser can request a list of 1024-byte dump files under `/ext/apps_data/skybase`, read dumps over the existing BLE serial service, and write selected dumps back to an existing dump path. This uses additional SkyBase protocol messages (`DUMP_LIST`, `DUMP_READ`, `DUMP_WRITE_BEGIN/CHUNK/END`), so the Flipper app must be rebuilt and reinstalled from this source; the prebuilt `dist/toybox.fap` in an older archive does not implement these messages. File operations are restricted to existing dump files under the SkyBase folder; metadata/settings files and unsent-save files are excluded.

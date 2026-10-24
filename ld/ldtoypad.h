@@ -61,6 +61,9 @@ typedef enum {
 
 ViewDispatcher* get_view_dispatcher();
 
+/* Ask the app to turn the Bluetooth web-page link on/off (done on its next tick). */
+void ldtoypad_request_ble_toggle(void);
+
 #ifdef __cplusplus
 }
 #endif

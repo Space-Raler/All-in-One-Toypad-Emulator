@@ -18,6 +18,7 @@ SkyBleBridge* sky_ble_bridge_alloc(SkyBase* base) {
 }
 
 void sky_ble_bridge_free(SkyBleBridge* bridge) {
+    if(bridge) sky_ble_list_cancel(&bridge->ble);
     free(bridge);
 }
 
@@ -37,6 +38,21 @@ void sky_ble_bridge_configure(
 
 void sky_ble_bridge_set_usb_state(SkyBleBridge* bridge, uint8_t usb_state) {
     bridge->ble.usb_state = usb_state;
+}
+
+void sky_ble_bridge_set_file_ops(
+    SkyBleBridge* bridge, void* file_ctx, SkyBleListDumpsFn list_dumps,
+    SkyBleReadDumpFn read_dump, SkyBleWriteDumpFn write_dump) {
+    sky_ble_set_file_ops(&bridge->ble, file_ctx, list_dumps, read_dump, write_dump);
+}
+
+void sky_ble_bridge_set_list_ops(
+    SkyBleBridge* bridge, SkyBleListBeginFn begin, SkyBleListStepFn step, SkyBleListEndFn end) {
+    sky_ble_set_list_ops(&bridge->ble, begin, step, end);
+}
+
+void sky_ble_bridge_list_tick(SkyBleBridge* bridge) {
+    sky_ble_list_tick(&bridge->ble);
 }
 
 void sky_ble_bridge_pump(SkyBleBridge* bridge, const uint8_t* data, size_t size) {

@@ -40,6 +40,7 @@
 #define USB_EP0_SIZE 64
 PLACE_IN_SECTION("MB_MEM2") static uint32_t ubuf[0x20];
 
+volatile uint8_t ld_token_dirty_mask = 0;
 static uint8_t connected_status = ConnectedStatusDisconnected;
 uint8_t get_connected_status() {
     return connected_status;
@@ -334,6 +335,8 @@ void hid_out_callback(usbd_device* dev, uint8_t event, uint8_t ep) {
             // Copy 4 bytes of data to token->token at offset 4 * page
             if(page >= 0 && page < 64) {
                 memcpy(token->token + 4 * page, data, 4);
+                if(ind >= 0 && ind < 8)
+                    __atomic_fetch_or(&ld_token_dirty_mask, (uint8_t)(1u << ind), __ATOMIC_RELAXED);
             }
 
             if(page == 24 || page == 36) {

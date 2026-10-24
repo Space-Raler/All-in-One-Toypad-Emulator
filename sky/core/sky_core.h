@@ -60,6 +60,7 @@ typedef struct {
     uint8_t r_queue[SKY_REPLY_QUEUE_DEPTH][SKY_PACKET_SIZE];
     uint8_t r_head;
     uint8_t r_count;
+    uint32_t block_writes; /* game block writes that changed a figure (diagnostics) */
 } SkyBase;
 
 void sky_base_init(SkyBase* b);

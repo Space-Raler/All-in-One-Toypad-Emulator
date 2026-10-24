@@ -103,6 +103,15 @@ static bool make_token_dir(Storage* storage) {
 void fill_saved_submenu(LDToyPadApp* app) {
     submenu_reset(app->submenu_saved_selection);
 
+    /* This can run again after a save: forget the old paths first or they pile up. */
+    for(uint8_t i = 0; i < app->saved_token_count; ++i) {
+        if(app->saved_token_paths[i]) {
+            furi_string_free(app->saved_token_paths[i]);
+            app->saved_token_paths[i] = NULL;
+        }
+    }
+    app->saved_token_count = 0;
+
     Storage* storage = furi_record_open(RECORD_STORAGE);
     File* dir = storage_file_alloc(storage);
     uint8_t token_count = 0;
@@ -176,9 +185,12 @@ bool save_token(Token* token) {
         (uint8_t)token->uid[5]);
 
     char name[16] = {0};
-    for(unsigned int i = 0; i < sizeof(token->name); i++) {
-        if(token->name[i] != ' ' && token->name[i] != '*') {
-            name[i] = token->name[i];
+    unsigned int n = 0;
+    for(unsigned int i = 0; i < sizeof(token->name) && token->name[i] && n < sizeof(name) - 1; i++) {
+        const char c = token->name[i];
+        /* keep letters and digits only: the name becomes part of a file name */
+        if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+            name[n++] = c;
         }
     }
 
@@ -378,4 +390,40 @@ bool is_favorite(int id) {
         if(favorite_ids[i] == id) return true;
     }
     return false;
+}
+
+// ---- Bluetooth link helpers ----
+void ld_saved_vehicle_list(void (*emit)(void* ctx, const char* name), void* ctx, int max) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    File* dir = storage_file_alloc(storage);
+    make_token_dir(storage);
+    if(storage_dir_open(dir, APP_DATA_PATH(TOKENS_DIR))) {
+        FileInfo file_info;
+        char file_name[FILEPATH_SIZE];
+        int count = 0;
+        while(count < max && storage_dir_read(dir, &file_info, file_name, sizeof(file_name))) {
+            if(file_info.flags & FSF_DIRECTORY) continue;
+            const size_t len = strlen(file_name);
+            if(len < 5 || strcmp(file_name + len - 4, TOKEN_FILE_EXTENSION) != 0) continue;
+            emit(ctx, file_name);
+            count++;
+        }
+        storage_dir_close(dir);
+    }
+    storage_file_free(dir);
+    furi_record_close(RECORD_STORAGE);
+}
+
+bool ld_saved_vehicle_read(const char* name, uint8_t uid[7], uint8_t data[180]) {
+    char path[FILE_NAME_LEN_MAX];
+    snprintf(path, sizeof(path), "%s/%s", APP_DATA_PATH(TOKENS_DIR), name);
+    Token* token = load_saved_token(path);
+    if(!token) return false;
+    const bool ok = is_vehicle(token) && (token->token[0x24 * 4] | token->token[0x24 * 4 + 1]);
+    if(ok) {
+        memcpy(uid, token->uid, 7);
+        memcpy(data, token->token, 180);
+    }
+    free(token);
+    return ok;
 }

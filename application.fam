@@ -19,6 +19,8 @@ App(
         "inf/infinity_figures.c",
         "inf/usb_infinity.c",
         "ld/ToyPadEmu.c",
+        "ld/ld_ble.c",
+        "ld/ld_ble_app.c",
         "ld/burtle.c",
         "ld/bytes.c",
         "ld/debug.c",
